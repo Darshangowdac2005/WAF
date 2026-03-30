@@ -27,7 +27,7 @@ def compare_l2a(results: list) -> pd.DataFrame:
     rows = [{
         "Model":         r["model"],
         "AUC":           r["auc"],
-        "Avg Precision": r["avg_precision"],
+        "Avg Precision": r.get("avg_precision", "-"),
         "TPR (recall)":  r["tpr"],
         "FPR":           r["fpr"],
         "TP": r.get("tp", "-"),
