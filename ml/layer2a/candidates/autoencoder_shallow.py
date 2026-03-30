@@ -2,304 +2,246 @@
 ml/layer2a/candidates/autoencoder_shallow.py
 
 Layer 2A Candidate 2 — Shallow Autoencoder (PyTorch)
-------------------------------------------------------
-One-class anomaly detector using reconstruction error.
-Trained ONLY on normal traffic. No attack labels needed.
+One-class anomaly detection via reconstruction error.
+Trained only on normal traffic.
 
-Architecture
-------------
-Encoder: 25 → 64 → 32 → 16  (bottleneck)
-Decoder: 16 → 32 → 64 → 25
-
-Anomaly score = MSE(input, reconstruction)
-Higher score = reconstruction failed = anomalous request
-
-Threshold = mean_train_error + 2 × std_train_error
-(computed on training set after fitting — stored alongside ONNX)
-
-This mirrors the autoencoder approach in Base Paper 2
-(Babaey & Faragardi 2025). Your standalone result can be directly
-compared to their stacked ensemble in the report.
+Architecture: Input(20) → 64 → 32 → 16 → 32 → 64 → Output(20)
+Anomaly score = per-sample MSE reconstruction error.
+Threshold = mean + N*std of training errors (learned, not hardcoded).
 """
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+from pathlib import Path
 import mlflow
-import mlflow.pytorch
-
-from feature_engineering.normalizer import Normalizer
-from feature_engineering.extractor import INPUT_DIM
 
 
-# ── Architecture ──────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 
-HIDDEN = [64, 32, 16]   # encoder dims; decoder is the mirror
+INPUT_DIM    = 25
+HIDDEN_DIMS  = [64, 32, 16]
+THRESHOLD_STD = 2.5   # anomaly threshold = mean + N*std of train errors
+
+TRAIN_PARAMS = {
+    "epochs":       60,
+    "batch_size":   256,
+    "lr":           1e-3,
+    "weight_decay": 1e-5,
+    "patience":     8,
+    "dropout":      0.1,
+}
 
 
-class ShallowAutoencoder(nn.Module):
+# ── Network ───────────────────────────────────────────────────────────────────
+
+class ShallowAE(nn.Module):
     """
-    Symmetric autoencoder with BatchNorm and Dropout.
-
-    Input/output dim = INPUT_DIM (25 features).
-    Bottleneck dim   = HIDDEN[-1] (16).
+    Symmetric autoencoder.
+    Encoder: 20 → 64 → 32 → 16
+    Decoder: 16 → 32 → 64 → 20
     """
 
-    def __init__(
-        self,
-        input_dim:   int   = INPUT_DIM,
-        hidden_dims: list  = HIDDEN,
-        dropout:     float = 0.1,
-    ):
+    def __init__(self, input_dim=INPUT_DIM, hidden_dims=HIDDEN_DIMS, dropout=0.1):
         super().__init__()
 
-        # Encoder
         enc = []
         prev = input_dim
         for h in hidden_dims:
-            enc += [
-                nn.Linear(prev, h),
-                nn.BatchNorm1d(h),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-            ]
+            enc += [nn.Linear(prev, h), nn.BatchNorm1d(h), nn.ReLU(), nn.Dropout(dropout)]
             prev = h
         self.encoder = nn.Sequential(*enc)
 
-        # Decoder (mirror — skip the bottleneck layer itself)
         dec = []
         for h in reversed(hidden_dims[:-1]):
-            dec += [
-                nn.Linear(prev, h),
-                nn.BatchNorm1d(h),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-            ]
+            dec += [nn.Linear(prev, h), nn.BatchNorm1d(h), nn.ReLU(), nn.Dropout(dropout)]
             prev = h
         dec.append(nn.Linear(prev, input_dim))
         self.decoder = nn.Sequential(*dec)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         return self.decoder(self.encoder(x))
 
-    @torch.no_grad()
-    def reconstruction_error(self, x: torch.Tensor) -> torch.Tensor:
-        """Per-sample MSE error, shape (N,). Higher = more anomalous."""
-        recon = self.forward(x)
-        return torch.mean((x - recon) ** 2, dim=1)
-
-
-# ── Training config ────────────────────────────────────────────────────────────
-
-TRAIN_CFG = {
-    "epochs":        60,
-    "batch_size":    256,
-    "lr":            1e-3,
-    "weight_decay":  1e-5,
-    "patience":      8,
-    "threshold_std": 2.0,   # threshold = mean + N * std of train recon errors
-    "dropout":       0.1,
-}
-
-
-# ── Train ──────────────────────────────────────────────────────────────────────
-
-def train(
-    X_train: np.ndarray,
-    X_val:   np.ndarray,
-    device:  str = None,
-    run_name: str = "shallow_autoencoder",
-) -> tuple:
-    """
-    Train Shallow Autoencoder on NORMAL-ONLY scaled feature vectors.
-
-    Parameters
-    ----------
-    X_train  : (N_train, 25) float32 — normal traffic only, already scaled
-    X_val    : (N_val,   25) float32 — normal traffic only, already scaled
-    device   : "cuda" | "cpu" | None (auto-detect)
-    run_name : MLflow run name
-
-    Returns
-    -------
-    (model, threshold, normalizer)
-        model      : trained ShallowAutoencoder (on CPU, ready to export)
-        threshold  : float — anomaly score cutoff
-        normalizer : fitted Normalizer (save this alongside the ONNX model)
-
-    Note: X_train and X_val should be RAW (unscaled) — this function
-    fits the Normalizer internally and returns it.
-    """
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[AE] Device: {device}")
-
-    # scale features
-    norm      = Normalizer()
-    X_tr_sc   = norm.fit(X_train)
-    X_val_sc  = norm.transform(X_val)
-
-    tr_ds  = TensorDataset(torch.from_numpy(X_tr_sc))
-    val_ds = TensorDataset(torch.from_numpy(X_val_sc))
-    tr_dl  = DataLoader(tr_ds,  batch_size=TRAIN_CFG["batch_size"],
-                        shuffle=True, drop_last=True)
-    val_dl = DataLoader(val_ds, batch_size=512)
-
-    model     = ShallowAutoencoder(dropout=TRAIN_CFG["dropout"]).to(device)
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=TRAIN_CFG["lr"],
-        weight_decay=TRAIN_CFG["weight_decay"],
-    )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, patience=3, factor=0.5, verbose=True
-    )
-
-    best_val  = float("inf")
-    patience  = 0
-    best_wts  = None
-
-    with mlflow.start_run(run_name=run_name):
-        mlflow.log_params({**TRAIN_CFG, "device": device,
-                           "input_dim": INPUT_DIM})
-
-        for epoch in range(1, TRAIN_CFG["epochs"] + 1):
-            # train
-            model.train()
-            tr_loss = 0.0
-            for (xb,) in tr_dl:
-                xb = xb.to(device)
-                optimizer.zero_grad()
-                loss = criterion(model(xb), xb)
-                loss.backward()
-                optimizer.step()
-                tr_loss += loss.item()
-            tr_loss /= len(tr_dl)
-
-            # validate
-            model.eval()
-            val_loss = 0.0
-            with torch.no_grad():
-                for (xb,) in val_dl:
-                    val_loss += criterion(model(xb.to(device)), xb.to(device)).item()
-            val_loss /= len(val_dl)
-            scheduler.step(val_loss)
-
-            mlflow.log_metrics({"train_loss": tr_loss, "val_loss": val_loss},
-                               step=epoch)
-
-            if epoch % 10 == 0:
-                print(f"[AE] Epoch {epoch:3d} | train={tr_loss:.5f} "
-                      f"| val={val_loss:.5f}")
-
-            if val_loss < best_val:
-                best_val = val_loss
-                patience = 0
-                best_wts = {k: v.clone() for k, v in model.state_dict().items()}
-            else:
-                patience += 1
-                if patience >= TRAIN_CFG["patience"]:
-                    print(f"[AE] Early stop at epoch {epoch}")
-                    break
-
-        model.load_state_dict(best_wts)
-
-        # compute threshold on training reconstruction errors
-        model.eval()
-        errors = []
+    def reconstruction_error(self, x):
+        """Per-sample MSE. Shape: (N,)"""
         with torch.no_grad():
-            for (xb,) in DataLoader(tr_ds, batch_size=512):
-                errors.append(
-                    model.reconstruction_error(xb.to(device)).cpu().numpy()
-                )
-        errors    = np.concatenate(errors)
-        mean_e    = float(errors.mean())
-        std_e     = float(errors.std())
-        threshold = mean_e + TRAIN_CFG["threshold_std"] * std_e
-
-        mlflow.log_metrics({
-            "recon_mean":       mean_e,
-            "recon_std":        std_e,
-            "anomaly_threshold": threshold,
-            "best_val_loss":    best_val,
-        })
-        print(f"[AE] Threshold: {threshold:.6f}  "
-              f"(mean={mean_e:.5f} + {TRAIN_CFG['threshold_std']}×std={std_e:.5f})")
-
-    model.cpu()
-    return model, threshold, norm
+            recon = self.forward(x)
+            return torch.mean((x - recon) ** 2, dim=1)
 
 
-# ── Evaluate ───────────────────────────────────────────────────────────────────
+# ── Model wrapper ─────────────────────────────────────────────────────────────
 
-def evaluate(
-    model:     ShallowAutoencoder,
-    norm:      Normalizer,
-    threshold: float,
-    X_test:    np.ndarray,
-    y_test:    np.ndarray,
-) -> dict:
+class ShallowAutoencoderModel:
     """
-    Evaluate on mixed test set (0=normal, 1=attack).
-    X_test should be RAW (unscaled).
+    Wrapper exposing the standard Layer 2A interface:
+        .train(X_normal, X_val)
+        .anomaly_scores(X)  -> np.ndarray
+        .predict(X)         -> np.ndarray (1=anomaly, 0=normal)
+        .export_onnx(path)
     """
-    from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix
 
-    X_sc = norm.transform(X_test)
-    X_t  = torch.from_numpy(X_sc)
+    def __init__(self):
+        self.net       = None
+        self.threshold = None
+        self.device    = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model.eval()
-    with torch.no_grad():
-        errors = model.reconstruction_error(X_t).numpy()
+    # ── Training ──────────────────────────────────────────────────────────────
 
-    preds = (errors > threshold).astype(int)
-    auc   = roc_auc_score(y_test, errors)
-    ap    = average_precision_score(y_test, errors)
-    tn, fp, fn, tp = confusion_matrix(y_test, preds).ravel()
-    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-    tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    def train(self, X_normal: np.ndarray, X_val: np.ndarray,
+              run_name: str = "shallow_autoencoder") -> None:
+        """
+        Train on normal-only data. X arrays should already be normalised.
+        Early stopping on val reconstruction loss.
+        Threshold set automatically after training.
+        """
+        device = self.device
+        print(f"[AE] Training on {device}")
 
-    results = {
-        "model":         "shallow_autoencoder",
-        "auc":           round(float(auc), 4),
-        "avg_precision": round(float(ap),  4),
-        "fpr":           round(fpr, 4),
-        "tpr":           round(tpr, 4),
-        "tp": int(tp), "fp": int(fp),
-        "tn": int(tn), "fn": int(fn),
-        "threshold":     round(threshold, 6),
-    }
+        X_tr = torch.from_numpy(X_normal.astype(np.float32))
+        X_v  = torch.from_numpy(X_val.astype(np.float32))
+        tr_dl = DataLoader(TensorDataset(X_tr), batch_size=TRAIN_PARAMS["batch_size"],
+                           shuffle=True, drop_last=True)
+        v_dl  = DataLoader(TensorDataset(X_v),  batch_size=512)
 
-    print("\n[AE] Evaluation:")
-    for k, v in results.items():
-        print(f"  {k:<22}: {v}")
+        net = ShallowAE(dropout=TRAIN_PARAMS["dropout"]).to(device)
+        opt = torch.optim.Adam(net.parameters(), lr=TRAIN_PARAMS["lr"],
+                               weight_decay=TRAIN_PARAMS["weight_decay"])
+        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=3, factor=0.5)
+        crit = nn.MSELoss()
 
-    return results
+        best_loss, patience_ctr, best_state = float("inf"), 0, None
 
+        with mlflow.start_run(run_name=run_name, nested=True):
+            mlflow.log_params(TRAIN_PARAMS)
 
-# ── ONNX export ────────────────────────────────────────────────────────────────
+            for epoch in range(1, TRAIN_PARAMS["epochs"] + 1):
+                net.train()
+                tr_loss = 0.0
+                for (xb,) in tr_dl:
+                    xb = xb.to(device)
+                    opt.zero_grad()
+                    loss = crit(net(xb), xb)
+                    loss.backward()
+                    opt.step()
+                    tr_loss += loss.item()
+                tr_loss /= len(tr_dl)
 
-def export_onnx(model: ShallowAutoencoder, output_path: str):
-    """Export PyTorch model to ONNX. Normalizer must be saved separately."""
-    import onnxruntime as ort
+                net.eval()
+                v_loss = 0.0
+                with torch.no_grad():
+                    for (xb,) in v_dl:
+                        v_loss += crit(net(xb.to(device)), xb.to(device)).item()
+                v_loss /= len(v_dl)
+                sch.step(v_loss)
 
-    model.eval().cpu()
-    dummy = torch.randn(1, INPUT_DIM)
+                mlflow.log_metrics({"train_loss": tr_loss, "val_loss": v_loss}, step=epoch)
 
-    torch.onnx.export(
-        model, dummy, output_path,
-        input_names=["features"],
-        output_names=["reconstruction"],
-        dynamic_axes={
-            "features":       {0: "batch"},
-            "reconstruction": {0: "batch"},
-        },
-        opset_version=17,
-    )
+                if epoch % 10 == 0:
+                    print(f"  epoch {epoch:3d} | train={tr_loss:.5f} | val={v_loss:.5f}")
 
-    sess = ort.InferenceSession(output_path)
-    out  = sess.run(None, {"features": dummy.numpy()})
-    print(f"[AE] ONNX exported → {output_path}")
-    print(f"[AE] ONNX validation OK. Output shape: {out[0].shape}")
+                if v_loss < best_loss:
+                    best_loss    = v_loss
+                    patience_ctr = 0
+                    best_state   = {k: v.clone() for k, v in net.state_dict().items()}
+                else:
+                    patience_ctr += 1
+                    if patience_ctr >= TRAIN_PARAMS["patience"]:
+                        print(f"[AE] Early stopping at epoch {epoch}")
+                        break
+
+            net.load_state_dict(best_state)
+            self.net = net
+
+            # compute threshold from training reconstruction errors
+            net.eval()
+            errs = []
+            with torch.no_grad():
+                for (xb,) in DataLoader(TensorDataset(X_tr), batch_size=512):
+                    errs.append(net.reconstruction_error(xb.to(device)).cpu().numpy())
+            errs = np.concatenate(errs)
+            self.threshold = float(errs.mean() + THRESHOLD_STD * errs.std())
+
+            mlflow.log_metrics({
+                "recon_mean": errs.mean(),
+                "recon_std":  errs.std(),
+                "threshold":  self.threshold,
+            })
+
+        print(f"[AE] Threshold = {self.threshold:.6f}  "
+              f"(mean={errs.mean():.5f} + {THRESHOLD_STD}*std={errs.std():.5f})")
+
+    # ── Inference ─────────────────────────────────────────────────────────────
+
+    def anomaly_scores(self, X: np.ndarray) -> np.ndarray:
+        """Reconstruction error per sample (higher = more anomalous)."""
+        self.net.eval()
+        t = torch.from_numpy(X.astype(np.float32)).to(self.device)
+        with torch.no_grad():
+            return self.net.reconstruction_error(t).cpu().numpy()
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """1=anomaly, 0=normal."""
+        return (self.anomaly_scores(X) >= self.threshold).astype(int)
+
+    def predict_single(self, x: np.ndarray) -> tuple:
+        """Returns (is_anomaly: bool, score: float). x shape (1, 20)."""
+        score   = float(self.anomaly_scores(x)[0])
+        is_anom = score >= (self.threshold or 0.0)
+        return is_anom, score
+
+    # ── Persistence ───────────────────────────────────────────────────────────
+
+    def save_weights(self, path: str) -> None:
+        torch.save({
+            "state_dict": self.net.state_dict(),
+            "threshold":  self.threshold,
+        }, path)
+        print(f"[AE] Weights saved → {path}")
+
+    def load_weights(self, path: str) -> None:
+        ck = torch.load(path, map_location=self.device)
+        self.net = ShallowAE().to(self.device)
+        self.net.load_state_dict(ck["state_dict"])
+        self.threshold = ck["threshold"]
+        self.net.eval()
+        print(f"[AE] Weights loaded ← {path}")
+
+    # ── ONNX export ───────────────────────────────────────────────────────────
+
+    def export_onnx(self, output_path: str) -> None:
+        self.net.eval().cpu()
+        dummy = torch.randn(1, INPUT_DIM)
+
+        torch.onnx.export(
+            self.net, dummy, output_path,
+            input_names=["features"],
+            output_names=["reconstruction"],
+            dynamic_axes={
+                "features":       {0: "batch"},
+                "reconstruction": {0: "batch"},
+            },
+            opset_version=17,
+        )
+
+        # save threshold
+        thr_path = output_path.replace(".onnx", "_threshold.txt")
+        with open(thr_path, "w") as f:
+            f.write(str(self.threshold or 0.0))
+
+        # validate
+        import onnxruntime as ort, time
+        sess  = ort.InferenceSession(output_path)
+        dummy_np = dummy.numpy()
+        times = []
+        for _ in range(50):
+            t0 = time.perf_counter()
+            sess.run(None, {"features": dummy_np})
+            times.append((time.perf_counter() - t0) * 1000)
+        avg_ms = np.mean(times)
+
+        print(f"[AE] ONNX exported → {output_path}")
+        print(f"[AE] Avg inference: {avg_ms:.3f}ms  |  "
+              f"{'PASS' if avg_ms < 2.0 else 'WARN >2ms'}")
+
+        self.net.to(self.device)  # restore device
