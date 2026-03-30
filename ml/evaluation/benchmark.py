@@ -89,7 +89,7 @@ def benchmark_all(exported_models_dir: str = "../exported_models") -> list:
         # determine input format
         if any(k in name for k in ["l2a", "autoencoder", "isolation", "iforest", "scaler"]):
             input_name  = "features"
-            dummy_input = np.random.randn(1, 20).astype(np.float32)
+            dummy_input = np.random.randn(1, 25).astype(np.float32)
             target_ms   = 2.0
             layer       = "L2A"
         else:
@@ -146,21 +146,21 @@ def print_report(results: list) -> None:
 # ── Per-model convenience functions ───────────────────────────────────────────
 
 def benchmark_isolation_forest(path: str) -> dict:
-    dummy = np.random.randn(1, 20).astype(np.float32)
+    dummy = np.random.randn(1, 25).astype(np.float32)
     res   = benchmark_onnx(path, "features", dummy)
     res["pass"] = res["p99_ms"] <= 2.0
     return res
 
 
 def benchmark_autoencoder(path: str) -> dict:
-    dummy = np.random.randn(1, 20).astype(np.float32)
+    dummy = np.random.randn(1, 25).astype(np.float32)
     res   = benchmark_onnx(path, "features", dummy)
     res["pass"] = res["p99_ms"] <= 2.0
     return res
 
 
 def benchmark_xgboost(path: str) -> dict:
-    dummy = np.random.randn(1, 20).astype(np.float32)
+    dummy = np.random.randn(1, 25).astype(np.float32)
     res   = benchmark_onnx(path, "features", dummy)
     res["pass"] = res["p99_ms"] <= 20.0
     return res
