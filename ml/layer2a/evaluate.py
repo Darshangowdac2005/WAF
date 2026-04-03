@@ -6,6 +6,7 @@ Shared by train.py and notebook 03.
 """
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import (
     roc_auc_score,
     confusion_matrix,
@@ -21,7 +22,7 @@ def evaluate_candidate(model, X_test: np.ndarray, y_test: np.ndarray, name: str)
     Parameters
     ----------
     model  : object with .anomaly_scores(X) -> np.ndarray and .predict(X) -> np.ndarray
-    X_test : (N, 20) float32 — already normalised
+    X_test : (N, 25) float32 — already normalised
     y_test : (N,)   int     — 0=normal, 1=attack
     name   : str label for the result dict
 
@@ -29,8 +30,8 @@ def evaluate_candidate(model, X_test: np.ndarray, y_test: np.ndarray, name: str)
     -------
     dict with keys: model, auc, avg_precision, fpr, tpr, tp, fp, tn, fn
     """
-    scores = model.anomaly_scores(X_test)   # higher = more anomalous
-    preds  = model.predict(X_test)          # 1=anomaly, 0=normal
+    scores = model.anomaly_scores(X_test)
+    preds  = model.predict(X_test)
 
     auc = roc_auc_score(y_test, scores)
     ap  = average_precision_score(y_test, scores)
@@ -57,27 +58,72 @@ def evaluate_candidate(model, X_test: np.ndarray, y_test: np.ndarray, name: str)
     return result
 
 
-def pick_best(results: list, models: dict, max_fpr: float = 0.05) -> tuple:
+def compare_l2a(results: list) -> "pd.DataFrame":
     """
-    Select the best L2A model.
-    Primary:   FPR <= max_fpr
-    Secondary: highest TPR
-    Tiebreak:  highest AUC
+    Build a comparison DataFrame from a list of evaluate_candidate result dicts.
+    Sorted by AUC descending.
 
-    Returns (winner_name, winner_model_object)
+    Parameters
+    ----------
+    results : list of dicts returned by evaluate_candidate()
+
+    Returns
+    -------
+    pd.DataFrame with columns: Model, AUC, Avg Precision, TPR (recall), FPR, TP, FP, TN, FN
     """
-    qualifying = [r for r in results if r["fpr"] <= max_fpr]
-    if not qualifying:
-        print(f"[pick_best] No model under FPR={max_fpr}. Taking lowest FPR.")
-        qualifying = sorted(results, key=lambda r: r["fpr"])[:1]
+    rows = []
+    for r in results:
+        rows.append({
+            "Model":         r["model"],
+            "AUC":           r["auc"],
+            "Avg Precision": r["avg_precision"],
+            "TPR (recall)":  r["tpr"],
+            "FPR":           r["fpr"],
+            "TP":            r["tp"],
+            "FP":            r["fp"],
+            "TN":            r["tn"],
+            "FN":            r["fn"],
+        })
+    df = pd.DataFrame(rows).sort_values("AUC", ascending=False).reset_index(drop=True)
+    return df
 
-    best = sorted(qualifying, key=lambda r: (-r["tpr"], -r["auc"]))[0]
+
+def pick_best_l2a(results: list, models: dict, target_fpr: float = 0.05) -> tuple:
+    print(">>> USING NEW pick_best_l2a() FROM evaluate.py <<<")
+    """
+    Selects the OVERALL best model.
+    
+    Priority:
+    1. Highest AUC (Overall separation power)
+    2. Lowest FPR (Production stability/Silence)
+    3. Highest TPR (Detection rate)
+    """
+    # Sort by AUC first (Primary quality metric)
+    # Then by FPR (Secondary: lower is better for WAF noise)
+    # Then by TPR (Tertiary: more detections)
+    sorted_results = sorted(
+        results, 
+        key=lambda r: (-r["auc"], r["fpr"], -r["tpr"])
+    )
+
+    best = sorted_results[0]
     name = best["model"]
 
-    print(f"\n[pick_best] Winner: {name}")
-    print(f"  FPR={best['fpr']}  TPR={best['tpr']}  AUC={best['auc']}")
+    # Special check: If the top AUC model has a catastrophic FPR (> 20%), 
+    # we fallback to the safest model under target_fpr.
+    if best["fpr"] > 0.20:
+        print(f"[compare] Top model {name} has extreme FPR ({best['fpr']}). Falling back to safe models...")
+        safe_models = [r for r in results if r["fpr"] <= target_fpr]
+        if safe_models:
+            best = sorted(safe_models, key=lambda r: (-r["auc"], -r["tpr"]))[0]
+            name = best["model"]
+
+    print(f"\n[compare] OVERALL WINNER: {name}")
+    print(f"  Final Decision Metrics -> AUC: {best['auc']} | FPR: {best['fpr']} | TPR: {best['tpr']}")
 
     return name, models[name]
+# ── Aliases kept for backward compatibility with train.py ─────────────────────
+pick_best = pick_best_l2a
 
 
 def threshold_sweep(model, X_val: np.ndarray, y_val: np.ndarray,
