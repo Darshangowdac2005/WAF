@@ -1,27 +1,30 @@
 {% macro threat_card(threat) %}
-<div class="threat-card threat-card--{{ threat.label.split('_')[0] }}">
+{% set url = threat.get('url', threat.get('path', '—')) %}
+{% set label = threat.get('label', 'other') %}
+{% set score = threat.get('score', 0) %}
+<div class="threat-card threat-card--{{ label.split('_')[0] }}">
   <div class="threat-card-head">
-    <span class="attack-badge attack-badge--{{ threat.label.split('_')[0] }}">
-      {{ threat.label }}
+    <span class="attack-badge attack-badge--{{ label.split('_')[0] }}">
+      {{ label }}
     </span>
-    <span class="score-pill score-pill--{{ 'high' if threat.score >= 70 else 'med' }}">
-      {{ threat.score }}
+    <span class="score-pill score-pill--{{ 'high' if score >= 70 else 'med' }}">
+      {{ score }}
     </span>
-    <span class="threat-layer mono dim">{{ threat.layer }}</span>
+    <span class="threat-layer mono dim">{{ threat.get('layer', '—') }}</span>
     <span class="threat-time mono dim">
-      {{ threat.timestamp.strftime('%H:%M:%S') if threat.timestamp else '—' }}
+      {{ threat.get('timestamp').strftime('%H:%M:%S') if threat.get('timestamp') else '—' }}
     </span>
   </div>
   <div class="threat-url mono">
-    {{ threat.url[:100] }}{% if threat.url|length > 100 %}…{% endif %}
+    {{ url[:100] }}{% if url|length > 100 %}…{% endif %}
   </div>
-  {% if threat.l2a_score %}
+  {% if threat.get('l2a_score') %}
   <div class="threat-scores">
-    <span class="score-chip">L2A {{ threat.l2a_score | round(4) }}</span>
-    {% if threat.confidence %}
-    <span class="score-chip">conf {{ (threat.confidence * 100) | round(1) }}%</span>
+    <span class="score-chip">L2A {{ threat.get('l2a_score') | round(4) }}</span>
+    {% if threat.get('confidence') %}
+    <span class="score-chip">conf {{ (threat.get('confidence') * 100) | round(1) }}%</span>
     {% endif %}
-    <span class="score-chip">ip {{ threat.ip or '—' }}</span>
+    <span class="score-chip">ip {{ threat.get('ip', '—') }}</span>
   </div>
   {% endif %}
 </div>

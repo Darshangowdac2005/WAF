@@ -1,3 +1,4 @@
+<!-- app/templates/partials/nav.html -->
 <nav class="nav">
   <a href="/dashboard" class="nav-brand">
     <span class="brand-icon">◈</span> WAF-ML
@@ -11,7 +12,9 @@
     <a href="/api/docs" class="nav-link" target="_blank">API ↗</a>
   </div>
   <div class="nav-right">
-    <span class="nav-version">v{{ version }}</span>
-    <span class="status-dot"></span>
+    <span class="nav-version">v{{ version | default('1.0.0') }}</span>
+    <div class="nav-status">
+      <span class="status-dot"></span>
+    </div>
   </div>
 </nav>

@@ -372,3 +372,14 @@ body {
   color: var(--text-faint);
   font-size: .8rem;
 }
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-left: auto;
+}
+.nav-version {
+  font-size: .7rem;
+  color: var(--text-faint);
+}

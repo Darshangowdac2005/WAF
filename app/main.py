@@ -68,13 +68,12 @@ app.add_exception_handler(ModelNotLoadedError, model_not_loaded_handler)
 app.add_exception_handler(DatabaseError,       database_error_handler)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-app.include_router(traffic_router, prefix="/api/traffic", tags=["API"])
-app.include_router(health_router,  prefix="/api/health",  tags=["API"])
-app.include_router(logs_router,     prefix="/dashboard/logs",     tags=["UI"])
-app.include_router(feedback_router, prefix="/dashboard/feedback", tags=["UI"])
-app.include_router(models_router,   prefix="/dashboard/models",   tags=["UI"])
-app.include_router(dashboard_router)
-
+app.include_router(traffic_router)   # already has prefix="/api/traffic"
+app.include_router(health_router)    # already has prefix="/api/health"
+app.include_router(logs_router)      # already has prefix="/api/logs"
+app.include_router(feedback_router)  # already has prefix="/api/feedback"
+app.include_router(models_router)    # already has prefix="/api/models"
+app.include_router(dashboard_router) # serves /dashboard, /dashboard/logs, /dashboard/feedback
 
 @app.get("/")
 async def root():

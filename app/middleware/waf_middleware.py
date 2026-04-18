@@ -220,18 +220,9 @@ async def _forward(request: Request, raw_body: bytes) -> Response:
 
 
 async def _log_and_store(
-    request_id,
-    ip,
-    method,
-    url,
-    body_len,
-    decision,
-    score,
-    label,
-    layer,
-    latency_ms,
-    l2a_score=None,
-    confidence=None,
+    request_id, ip, method, url, body_len,
+    decision, score, label, layer, latency_ms,
+    l2a_score=None, confidence=None,
 ):
     now = datetime.utcnow()
     doc = {
@@ -263,3 +254,19 @@ async def _log_and_store(
             await insert_threat_event(threat_doc)
         except Exception as e:
             logger.error("Threat insert failed: %s", e, exc_info=True)
+
+    # ── NEW: borderline requests go to feedback queue for human review ──
+    if decision == "log":
+        from app.db.collections import feedback_queue
+        feedback_doc = {
+            **doc,
+            "l2a_score": l2a_score,
+            "confidence": confidence,
+            "verified_label": None,
+            "poisoning_flag": False,
+            "auto_classified": False,
+        }
+        try:
+            await feedback_queue().insert_one(feedback_doc)
+        except Exception as e:
+            logger.error("Feedback insert failed: %s", e, exc_info=True)

@@ -3,6 +3,31 @@
 {% block title %}WAF-ML — Threats{% endblock %}
 {% set active = "threats" %}
 
+{% block head %}
+<style>
+.threat-filters { display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:1.2rem; }
+.threat-card {
+  background:var(--bg-card); border:1px solid var(--border);
+  border-radius:var(--radius); padding:1rem 1.25rem; margin-bottom:.6rem;
+  border-left-width:3px;
+}
+.threat-card--sqli   { border-left-color:var(--red); }
+.threat-card--xss    { border-left-color:#a855f7; }
+.threat-card--lfi    { border-left-color:#f97316; }
+.threat-card--other  { border-left-color:var(--amber); }
+.threat-card--cmdi   { border-left-color:var(--amber); }
+.threat-card-head    { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; flex-wrap:wrap; }
+.threat-layer, .threat-time { font-size:.75rem; }
+.threat-url          { font-size:.75rem; color:var(--text-dim); word-break:break-all; margin-bottom:.5rem; }
+.threat-scores       { display:flex; gap:.4rem; flex-wrap:wrap; }
+.score-chip {
+  font-size:.7rem; padding:.15rem .5rem; border-radius:3px;
+  background:var(--bg-hover); border:1px solid var(--border); color:var(--text-dim);
+  font-family:var(--font-mono);
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
   <h1>Threat Events</h1>
@@ -26,38 +51,18 @@
 {% endblock %}
 
 {% block scripts %}
-<style>
-.threat-filters { display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:1.2rem; }
-.threat-card {
-  background:var(--bg-card); border:1px solid var(--border);
-  border-radius:var(--radius); padding:1rem 1.25rem; margin-bottom:.6rem;
-  border-left-width:3px;
-}
-.threat-card--sqli   { border-left-color:var(--red); }
-.threat-card--xss    { border-left-color:#a855f7; }
-.threat-card--lfi    { border-left-color:#f97316; }
-.threat-card--other  { border-left-color:var(--amber); }
-.threat-card--cmdi   { border-left-color:var(--amber); }
-.threat-card-head    { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; flex-wrap:wrap; }
-.threat-layer, .threat-time { font-size:.75rem; }
-.threat-url          { font-size:.75rem; color:var(--text-dim); word-break:break-all; margin-bottom:.5rem; }
-.threat-scores       { display:flex; gap:.4rem; flex-wrap:wrap; }
-.score-chip {
-  font-size:.7rem; padding:.15rem .5rem; border-radius:3px;
-  background:var(--bg-hover); border:1px solid var(--border); color:var(--text-dim);
-  font-family:var(--font-mono);
-}
-</style>
 <script>
 function filterThreats(label) {
-  document.querySelectorAll('.threat-card').forEach(card => {
-    card.style.display = (!label || card.classList.contains('threat-card--' + label.split('_')[0])) ? '' : 'none';
+  document.querySelectorAll('.threat-card').forEach(function(card) {
+    if (!label || card.classList.contains('threat-card--' + label.split('_')[0])) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
   });
-  document.querySelectorAll('.filter-btn').forEach(btn => {
+  document.querySelectorAll('.filter-btn').forEach(function(btn) {
     btn.classList.toggle('active', btn.textContent.trim() === (label || 'all'));
   });
 }
-// Auto-refresh every 15s
-setTimeout(() => location.reload(), 15000);
 </script>
 {% endblock %}

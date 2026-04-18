@@ -31,10 +31,10 @@ async def _loop() -> None:
         except Exception as e:
             logger.error("Health monitor error: %s", e)
 
+# app/services/health_monitor.py
 async def _check_app_health() -> dict:
-    """Ping protected app health endpoint and collect metrics."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:  # was 5.0
             r = await client.get(f"{settings.PROTECTED_APP_URL}/health")
             app_data = r.json() if r.status_code == 200 else {}
     except Exception:
@@ -47,9 +47,3 @@ async def _check_app_health() -> dict:
         "latency_p99": app_data.get("latency_p99", 0.0),
         "cpu_pct":     app_data.get("cpu_pct", 0.0),
     }
-
-async def _trigger_audit() -> None:
-    """Pull borderline-scored requests for human review."""
-    pending = await get_pending_feedback(limit=500)
-    logger.info("Audit triggered — %d items in feedback queue", len(pending))
-    # In production: send alert / webhook / email here
