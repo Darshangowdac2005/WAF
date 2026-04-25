@@ -84,7 +84,7 @@ PARAMS = {
     "n_jobs":        -1,
 }
 
-INPUT_DIM = 25   # must match len(FEATURE_NAMES) in extractor.py
+INPUT_DIM = 29   # must match len(FEATURE_NAMES) in extractor.py
 
 
 # ── Model class ────────────────────────────────────────────────────────────────
@@ -174,36 +174,21 @@ class IsolationForestModel:
         X_normal_val: np.ndarray,
         X_attack_val: np.ndarray,
         target_fpr:   float = 0.05,
+        max_fnr:      float = 0.05,
         n_steps:      int   = 500,
     ) -> float:
         """
         Find the anomaly score threshold using SEPARATE normal and attack
         validation splits.
 
-        Why separate sets:
-            FPR = FP / (FP + TN) must be measured on normal-only samples.
-            TPR = TP / (TP + FN) must be measured on attack-only samples.
-            Mixing them distorts both rates — this was the root cause of Bug 1.
-
-        Why bounded sweep [normal_P50 … normal_P99]:
-            Sweeping from the absolute maximum score (Bug 2) means the
-            very first threshold already has FPR=0, so it is selected
-            regardless of how many attacks it actually catches.
-            The correct threshold must lie in the range where the model
-            meaningfully discriminates — between P50 (too lenient) and
-            P99 (appropriately strict) of the normal val scores.
-
-        Sweep direction HIGH → LOW (strict → lenient):
-            We want the tightest threshold that still satisfies FPR ≤ target.
-            Starting strict and loosening is numerically stable.
-
         Parameters
         ----------
-        X_normal_val : (N, 25) float32 — normal-only validation samples.
+        X_normal_val : (N, 29) float32 — normal-only validation samples.
                        FPR is measured here. Never mix in attack samples.
-        X_attack_val : (M, 25) float32 — attack-only validation samples.
+        X_attack_val : (M, 29) float32 — attack-only validation samples.
                        TPR is measured here.
         target_fpr   : float — max acceptable false positive rate (default 0.05)
+        max_fnr      : float — NEW: cap false-negative rate at 5% (min TPR 95%)
         n_steps      : int   — sweep resolution (default 500)
 
         Returns
@@ -217,21 +202,11 @@ class IsolationForestModel:
         attack_scores = self.anomaly_scores(X_attack_val)
 
         # ── Bound sweep to normal score percentile range ──────────────────────
-        # Using val normal scores (not training scores) for the bounds so they
-        # reflect the same distribution the threshold will be applied to.
         lo = float(np.percentile(normal_scores, 50))   # ~50% FPR at this point
         hi = float(np.percentile(normal_scores, 99))   # ~1%  FPR at this point
 
         print(f"[IForest] Threshold sweep: [{lo:.5f} … {hi:.5f}]")
-        print(f"  (val normal P50={lo:.5f}, P99={hi:.5f})")
-        print(f"  Attack scores: min={attack_scores.min():.5f}  "
-              f"mean={attack_scores.mean():.5f}  max={attack_scores.max():.5f}")
-
-        pct_attacks_above_hi = (attack_scores > hi).mean() * 100
-        print(f"  {pct_attacks_above_hi:.1f}% of attacks already score above "
-              f"normal P99 — these are easily detected at any threshold ≤ P99.")
-
-        # ── Sweep HIGH → LOW ──────────────────────────────────────────────────
+        
         best_thr, best_tpr = None, 0.0
 
         for thr in np.linspace(hi, lo, n_steps):
@@ -244,11 +219,16 @@ class IsolationForestModel:
             tp  = int(np.sum(attack_scores >= thr))
             fn  = int(np.sum(attack_scores <  thr))
             tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            fnr = 1.0 - tpr
 
-            # Must not flag ALL normal requests (TN > 0 required)
-            if tn == 0:
-                continue
+            if tn == 0: continue
 
+            # NEW: prioritize target_fpr, but also enforce max_fnr if possible
+            if fpr <= target_fpr and fnr <= max_fnr:
+                best_tpr = tpr
+                best_thr = float(thr)
+                break # Stop at strictest threshold that meets both
+            
             if fpr <= target_fpr and tpr > best_tpr:
                 best_tpr = tpr
                 best_thr = float(thr)

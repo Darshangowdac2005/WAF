@@ -5,13 +5,13 @@ Trains all three Layer 2B candidates, evaluates them,
 picks the winner, and exports to ONNX.
 
 Data requirements in ml/data/splits/:
-    l2b_train_X_numeric.npy   (N, 20) float32  — for XGBoost
-    l2b_train_X_tokens.npy    (N, 512) int32    — for CNN, GRU
+    l2b_train_X_numeric.npy   (N, 29) float32  — for XGBoost
+    l2b_train_X_tokens.npy    (N, 256) int32    — for CNN, GRU
     l2b_train_y.npy           (N,)    int
     l2b_val_X_numeric.npy, l2b_val_X_tokens.npy, l2b_val_y.npy
     l2b_test_X_numeric.npy,  l2b_test_X_tokens.npy,  l2b_test_y.npy
 
-Labels: 0=normal, 1=sqli, 2=xss, 3=lfi, 4=other_attack
+Labels: 0=normal, 1=sqli, 2=xss, 3=lfi, 4=other_attack, 5=cmdi
 """
 
 import numpy as np

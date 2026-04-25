@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score, accuracy_score
 from xgboost import XGBClassifier
 
-CLASS_NAMES = ["normal", "sqli", "xss", "lfi", "other_attack"]
+CLASS_NAMES = ["normal", "sqli", "xss", "lfi", "other_attack", "cmdi"]
 NUM_CLASSES  = len(CLASS_NAMES)
 
 PARAMS = {
@@ -51,7 +51,7 @@ class XGBoostModel:
               X_val: np.ndarray, y_val: np.ndarray,
               run_name: str = "xgboost_l2b") -> None:
         """
-        X arrays are numeric feature vectors (N, 20).
+        X arrays are numeric feature vectors (N, 29).
         Applies StandardScaler internally.
         """
         with mlflow.start_run(run_name=run_name, nested=True):
@@ -135,7 +135,7 @@ class XGBoostModel:
 
     # ── ONNX export ───────────────────────────────────────────────────────────
 
-    def export_onnx(self, output_path: str, input_dim: int = 20) -> None:
+    def export_onnx(self, output_path: str, input_dim: int = 29) -> None:
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
         from sklearn.pipeline import Pipeline

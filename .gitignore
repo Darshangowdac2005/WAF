@@ -42,3 +42,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# MongoDB data
+db_data/
+data/

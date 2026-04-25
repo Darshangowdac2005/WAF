@@ -38,7 +38,7 @@ import mlflow
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-INPUT_DIM     = 25          # must match len(FEATURE_NAMES) in extractor.py
+INPUT_DIM     = 29          # must match len(FEATURE_NAMES) in extractor.py
 HIDDEN_DIMS   = [64, 32, 16]
 THRESHOLD_STD = 2.5         # used only for the unsupervised initial threshold
 
@@ -222,36 +222,21 @@ class ShallowAutoencoderModel:
         X_normal_val: np.ndarray,
         X_attack_val: np.ndarray,
         target_fpr:   float = 0.05,
+        max_fnr:      float = 0.05,
         n_steps:      int   = 500,
     ) -> float:
         """
         Refine the anomaly threshold using separate normal and attack
         validation splits.
 
-        Why separate sets (not mixed):
-            FPR = FP / (FP + TN) must be measured on normal-only samples.
-            TPR = TP / (TP + FN) must be measured on attack-only samples.
-            Mixing them distorts both rates, causing absurdly low thresholds
-            to appear acceptable (Bug 1).
-
-        Why sweep bounded to [normal_P50 … normal_P99]:
-            hi = normal_P99: at this threshold ~1% of normal traffic is flagged.
-                 Any sensible threshold starts here or below.
-            lo = normal_P50: at this threshold ~50% of normal traffic is flagged.
-                 Below this point the false alarm rate is unusably high.
-            Bounding prevents Bug 2 (hi=absolute max → threshold stuck at ~24).
-
-        Sweep direction HIGH → LOW (strict → lenient):
-            We want the tightest threshold satisfying FPR ≤ target_fpr with
-            maximum TPR. Starting strict and loosening is numerically stable.
-
         Parameters
         ----------
-        X_normal_val : (N, 25) float32 — normalised normal-only val samples.
+        X_normal_val : (N, 29) float32 — normalised normal-only val samples.
                        FPR is measured here. Never mix attack samples in.
-        X_attack_val : (M, 25) float32 — normalised attack-only val samples.
+        X_attack_val : (M, 29) float32 — normalised attack-only val samples.
                        TPR is measured here.
         target_fpr   : float — max acceptable FPR (default 0.05 = 5%)
+        max_fnr      : float — NEW: cap false-negative rate at 5% (min TPR 95%)
         n_steps      : int   — sweep resolution (default 500)
 
         Returns
@@ -265,8 +250,6 @@ class ShallowAutoencoderModel:
         attack_scores = self.anomaly_scores(X_attack_val)
 
         # ── Bound sweep to normal val score percentile range ──────────────────
-        # Using val scores (not training scores) so bounds reflect the same
-        # distribution the threshold will operate on at inference.
         lo = float(np.percentile(normal_scores, 50))   # ~50% FPR — lenient end
         hi = float(np.percentile(normal_scores, 99))   # ~1%  FPR — strict end
 

@@ -66,6 +66,7 @@ def main():
         X_normal_val=X_val,
         X_attack_val=X_atk_val,
         target_fpr=0.05,
+        max_fnr=0.05,
     )
     res_if = evaluate_candidate(iforest, X_test, y_test, name="isolation_forest")
     all_results.append(res_if)
@@ -78,6 +79,7 @@ def main():
         X_normal_val=X_val,
         X_attack_val=X_atk_val,
         target_fpr=0.05,
+        max_fnr=0.05,
     )
     res_ae = evaluate_candidate(ae, X_test, y_test, name="shallow_autoencoder")
     all_results.append(res_ae)
