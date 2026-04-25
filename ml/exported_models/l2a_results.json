@@ -2,25 +2,25 @@
   "results": [
     {
       "model": "isolation_forest",
-      "auc": 0.9293,
-      "avg_precision": 0.9842,
-      "fpr": 0.032,
-      "tpr": 0.3701,
-      "tp": 1727,
-      "fp": 24,
-      "tn": 726,
-      "fn": 2939
+      "auc": 0.9267,
+      "avg_precision": 0.9471,
+      "fpr": 0.04,
+      "tpr": 0.6069,
+      "tp": 1320,
+      "fp": 54,
+      "tn": 1296,
+      "fn": 855
     },
     {
       "model": "shallow_autoencoder",
-      "auc": 0.9832,
-      "avg_precision": 0.9974,
-      "fpr": 0.0227,
-      "tpr": 0.9233,
-      "tp": 4308,
-      "fp": 17,
-      "tn": 733,
-      "fn": 358
+      "auc": 0.9831,
+      "avg_precision": 0.9917,
+      "fpr": 0.063,
+      "tpr": 0.9536,
+      "tp": 2074,
+      "fp": 85,
+      "tn": 1265,
+      "fn": 101
     }
   ],
   "winner": "shallow_autoencoder"

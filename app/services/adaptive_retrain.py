@@ -33,7 +33,7 @@ async def run_retrain_cycle() -> dict:
 
     # Anti-poisoning: per-IP cap
     from collections import defaultdict
-    import services.layer1 as l1
+    import app.services.layer1_filter as l1
     ip_counts: dict = defaultdict(int)
     clean = []
     for s in samples:

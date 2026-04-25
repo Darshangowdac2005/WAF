@@ -8,14 +8,17 @@ from app.core.logging import logger
 _sess = None
 _in_name = None
 
-# MUST match training exactly
+# MUST match training label order exactly.
+# Current trained model: 0=normal,1=sqli,2=xss,3=lfi,4=other_attack (5 classes)
+# Next retrain target:   0=normal,1=sqli,2=xss,3=lfi,4=other_attack,5=cmdi (6 classes)
+# NOTE: cmdi was previously misplaced at index 4 — fixed here.
 CLASS_NAMES = [
     "normal",
     "sqli",
     "xss",
     "lfi",
-    "cmdi",
-    "other_attack",
+    "other_attack",   # index 4 — matches current trained model
+    "cmdi",           # index 5 — active after 6-class retrain
 ]
 
 # if your ONNX model expects token_ids, keep True
@@ -29,10 +32,18 @@ def load() -> None:
     if not onnx_path.exists():
         raise FileNotFoundError(f"L2B ONNX not found: {onnx_path}")
 
-    _sess = ort.InferenceSession(str(onnx_path))
+    # Tune session options for low-latency single-request CPU serving
+    opts = ort.SessionOptions()
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    opts.intra_op_num_threads = 2   # avoids spin-up overhead on small models
+    opts.inter_op_num_threads = 1
+    opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+    _sess = ort.InferenceSession(str(onnx_path), sess_options=opts)
     _in_name = _sess.get_inputs()[0].name
 
-    logger.info("L2B loaded | input=%s | uses_tokens=%s", _in_name, USES_TOKENS)
+    logger.info("L2B loaded | input=%s | uses_tokens=%s | classes=%d",
+                _in_name, USES_TOKENS, len(CLASS_NAMES))
 
 
 def infer(fvec_scaled: np.ndarray, token_ids: np.ndarray):

@@ -59,22 +59,39 @@ def evaluate_candidate(model, X_test, y_test: np.ndarray, name: str) -> dict:
     return result
 
 
-def pick_best(results: list, models: dict, min_attack_f1: float = 0.90) -> tuple:
+CLASS_NAMES = ["normal", "sqli", "xss", "lfi", "other_attack", "cmdi"]
+
+
+def pick_best(results: list, models: dict,
+              min_attack_f1: float = 0.90,
+              max_p99_ms: float = 20.0) -> tuple:
     """
-    Select best L2B model.
+    Select best L2B model with BOTH accuracy AND latency constraints.
+
     Primary:   highest macro F1
-    Constraint: all attack-class F1 >= min_attack_f1
-                (we don't tolerate a model that's great on average
-                 but catastrophically misses one attack type)
+    Constraint 1: all attack-class F1 >= min_attack_f1
+    Constraint 2: ONNX P99 inference latency <= max_p99_ms
+                  (disqualifies GRU if it exceeds the SLA even at higher F1)
 
     Returns (winner_name, winner_model_object)
     """
-    attack_classes = ["sqli", "xss", "lfi", "other_attack"]
+    attack_classes = ["sqli", "xss", "lfi", "other_attack", "cmdi"]
 
-    def all_ok(r):
-        return all(r["per_class_f1"].get(c, 0) >= min_attack_f1 for c in attack_classes)
+    def f1_ok(r):
+        return all(r["per_class_f1"].get(c, 0) >= min_attack_f1 for c in attack_classes
+                   if c in r["per_class_f1"])  # skip classes not yet in training set
 
-    qualifying = [r for r in results if all_ok(r)]
+    def latency_ok(r):
+        # p99_ms is populated by export_onnx() benchmark — default 0 means not measured
+        return r.get("p99_ms", 0) <= max_p99_ms or r.get("p99_ms", 0) == 0
+
+    qualifying = [r for r in results if f1_ok(r) and latency_ok(r)]
+
+    if not qualifying:
+        print(f"[pick_best] No model meets F1>={min_attack_f1} AND p99<={max_p99_ms}ms. "
+              f"Relaxing latency constraint.")
+        qualifying = [r for r in results if f1_ok(r)]
+
     if not qualifying:
         print(f"[pick_best] No model meets per-class F1>={min_attack_f1}. "
               f"Selecting highest macro F1.")
@@ -84,8 +101,10 @@ def pick_best(results: list, models: dict, min_attack_f1: float = 0.90) -> tuple
     name = best["model"]
 
     print(f"\n[pick_best] Winner: {name}")
-    print(f"  Macro F1={best['macro_f1']}  Accuracy={best['accuracy']}")
+    print(f"  Macro F1={best['macro_f1']}  Accuracy={best['accuracy']}"
+          f"  P99={best.get('p99_ms', 'N/A')}ms")
     for cls in CLASS_NAMES:
-        print(f"  F1[{cls}]={best['per_class_f1'][cls]}")
+        if cls in best["per_class_f1"]:
+            print(f"  F1[{cls}]={best['per_class_f1'][cls]}")
 
-    return name, models[name]
+    return name, models[name]

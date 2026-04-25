@@ -34,7 +34,7 @@ async def _loop() -> None:
 # app/services/health_monitor.py
 async def _check_app_health() -> dict:
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:  # was 5.0
+        async with httpx.AsyncClient(timeout=2.0) as client:
             r = await client.get(f"{settings.PROTECTED_APP_URL}/health")
             app_data = r.json() if r.status_code == 200 else {}
     except Exception:
@@ -47,3 +47,23 @@ async def _check_app_health() -> dict:
         "latency_p99": app_data.get("latency_p99", 0.0),
         "cpu_pct":     app_data.get("cpu_pct", 0.0),
     }
+
+
+async def _trigger_audit() -> None:
+    """
+    Called when error_rate exceeds ERROR_RATE_THRESHOLD.
+    Logs a structured audit record to the health snapshot collection
+    and emits a warning so ops/alerting pipelines can pick it up.
+    """
+    from app.db.queries import insert_health_snapshot
+    audit_doc = {
+        "timestamp": datetime.utcnow(),
+        "event":     "audit_triggered",
+        "reason":    "error_rate_exceeded_threshold",
+        "threshold": settings.ERROR_RATE_THRESHOLD,
+    }
+    try:
+        await insert_health_snapshot(audit_doc)
+        logger.warning("Audit record written: %s", audit_doc)
+    except Exception as e:
+        logger.error("Failed to write audit record: %s", e)

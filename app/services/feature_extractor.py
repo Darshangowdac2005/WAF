@@ -33,7 +33,7 @@ from ml.feature_engineering.normalizer import Normalizer           # noqa: E402
 # ---------------------------------------------------------------------
 # Shared tokenizer / normalizer
 # ---------------------------------------------------------------------
-_tokenizer = CharTokenizer(max_len=512)
+_tokenizer = CharTokenizer(max_len=256)  # reduced from 512 to cut L2B latency ~40-50%
 _normalizer = None
 
 

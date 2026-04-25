@@ -20,7 +20,14 @@ def load() -> None:
     if not thr_path.exists():
         raise FileNotFoundError(f"L2A threshold not found: {thr_path}")
 
-    _sess = ort.InferenceSession(str(onnx_path))
+    # Tune session options for low-latency single-request CPU serving
+    opts = ort.SessionOptions()
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    opts.intra_op_num_threads = 2
+    opts.inter_op_num_threads = 1
+    opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+    _sess = ort.InferenceSession(str(onnx_path), sess_options=opts)
     _in_name = _sess.get_inputs()[0].name
 
     with open(thr_path, "r", encoding="utf-8") as f:

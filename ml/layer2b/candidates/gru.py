@@ -24,9 +24,9 @@ import mlflow
 
 from feature_engineering.tokenizer import VOCAB_SIZE, CharTokenizer
 
-CLASS_NAMES = ["normal", "sqli", "xss", "lfi", "other_attack"]
+CLASS_NAMES = ["normal", "sqli", "xss", "lfi", "other_attack", "cmdi"]
 NUM_CLASSES = len(CLASS_NAMES)
-MAX_LEN     = 512
+MAX_LEN     = 256  # reduced from 512; matches runtime tokenizer max_len
 
 TRAIN_PARAMS = {
     "epochs":       45,
@@ -256,13 +256,17 @@ class GRUModel:
 
     # ── ONNX export ───────────────────────────────────────────────────────────
 
-    def export_onnx(self, output_path: str) -> None:
+    def export_onnx(self, output_path: str) -> dict:
+        """Export to ONNX and return latency benchmark dict for pick_best()."""
         self.net.eval().cpu()
         dummy = torch.zeros(1, MAX_LEN, dtype=torch.long)
         torch.onnx.export(
             self.net, dummy, output_path,
             input_names=["token_ids"], output_names=["logits"],
-            dynamic_axes={"token_ids": {0: "batch"}, "logits": {0: "batch"}},
+            dynamic_axes={
+                "token_ids": {0: "batch", 1: "seq_len"},  # both dims dynamic
+                "logits":    {0: "batch"},
+            },
             opset_version=17,
         )
         self.net.to(self.device)
@@ -271,16 +275,17 @@ class GRUModel:
         sess = ort.InferenceSession(output_path)
         dummy_np = dummy.numpy()
         times = []
-        for _ in range(100):
+        for _ in range(200):
             t0 = time.perf_counter()
             sess.run(None, {"token_ids": dummy_np})
             times.append((time.perf_counter() - t0) * 1000)
 
         avg_ms = round(np.mean(times), 3)
         p99_ms = round(np.percentile(times, 99), 3)
-        print(f"[GRU] ONNX exported → {output_path}")
-        print(f"[GRU] avg={avg_ms}ms  p99={p99_ms}ms  "
-              f"{'PASS' if p99_ms < 20 else 'WARN >20ms'}")
+        status = "PASS" if p99_ms < 20 else "WARN >20ms (latency gate may disqualify)"
+        print(f"[GRU] ONNX exported -> {output_path}")
+        print(f"[GRU] avg={avg_ms}ms  p99={p99_ms}ms  {status}")
+        return {"avg_ms": avg_ms, "p99_ms": p99_ms}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

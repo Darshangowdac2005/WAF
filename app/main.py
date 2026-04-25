@@ -2,8 +2,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
 
 from app.core.config    import settings
 from app.core.logging   import setup_logging, logger
@@ -11,7 +9,7 @@ from app.core.exceptions import (ModelNotLoadedError, DatabaseError,
                               model_not_loaded_handler, database_error_handler)
 from app.db.mongodb     import connect_db, close_db
 from app.middleware.waf_middleware import WAFMiddleware
-from app.middleware.rate_limiter   import limiter
+from app.middleware.rate_limiter   import rate_limiter  # sliding-window limiter (replaces slowapi)
 
 import app.services.layer1_filter as l1
 import app.services.layer2a_anomaly as l2a
@@ -61,8 +59,6 @@ app = FastAPI(
     redoc_url="/api/redoc",
 )
 
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(WAFMiddleware)
 app.add_exception_handler(ModelNotLoadedError, model_not_loaded_handler)
 app.add_exception_handler(DatabaseError,       database_error_handler)

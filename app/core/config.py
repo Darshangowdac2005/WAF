@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     ERROR_RATE_THRESHOLD:      float = 0.10
     RETRAIN_MIN_SAMPLES:       int   = 200
 
+    # L2B latency control
+    L2B_TOKEN_MAX_LEN:     int = 256  # must match feature_extractor.py CharTokenizer max_len
+
+    # Rate-limiter / IP-ban settings
+    IP_BAN_THRESHOLD:      int = 5    # violations before IP is auto-banned
+    IP_BAN_DURATION_SEC:   int = 300  # ban duration in seconds (5 minutes)
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 settings = Settings()

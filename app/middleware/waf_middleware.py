@@ -19,6 +19,7 @@ import app.services.layer2a_anomaly as l2a
 import app.services.layer2b_deep as l2b
 import app.services.threat_scorer as scorer
 from app.services.feature_extractor import extract
+from app.middleware.rate_limiter import rate_limiter
 from app.db.queries import insert_request_log, insert_threat_event
 from app.core.config import settings
 from app.core.logging import logger
@@ -32,6 +33,13 @@ class WAFMiddleware(BaseHTTPMiddleware):
 
         t0 = time.perf_counter()
         request_id = str(uuid.uuid4())
+
+        # ── Rate Limiter (cheapest check — runs FIRST) ────────────────────────
+        rl_response = await rate_limiter.check(request)
+        if rl_response is not None:
+            rl_response.headers["X-Request-ID"] = request_id
+            return rl_response
+
 
         # ── Read request body safely ──────────────────────────────────────────
         raw_body = b""
@@ -82,6 +90,11 @@ class WAFMiddleware(BaseHTTPMiddleware):
                     "blocked": True,
                     "reason": l1_reason,
                     "request_id": request_id,
+                },
+                headers={
+                    "X-WAF-Decision": "block",
+                    "X-Request-ID": request_id,
+                    "X-WAF-Latency-ms": str(ms),
                 },
             )
 
@@ -137,7 +150,11 @@ class WAFMiddleware(BaseHTTPMiddleware):
                 l2a_score=l2a_score,
                 confidence=1.0,
             )
-            return await _forward(request, raw_body)
+            fwd = await _forward(request, raw_body)
+            fwd.headers["X-WAF-Decision"] = "allow"
+            fwd.headers["X-Request-ID"] = request_id
+            fwd.headers["X-WAF-Latency-ms"] = str(ms)
+            return fwd
 
         # ── Layer 2B: Classifier (only for anomalies) ────────────────────────
         try:
@@ -183,9 +200,18 @@ class WAFMiddleware(BaseHTTPMiddleware):
                     "score": score,
                     "request_id": request_id,
                 },
+                headers={
+                    "X-WAF-Decision": "block",
+                    "X-Request-ID": request_id,
+                    "X-WAF-Latency-ms": str(ms),
+                },
             )
 
-        return await _forward(request, raw_body)
+        fwd = await _forward(request, raw_body)
+        fwd.headers["X-WAF-Decision"] = decision  # "allow" or "log"
+        fwd.headers["X-Request-ID"] = request_id
+        fwd.headers["X-WAF-Latency-ms"] = str(ms)
+        return fwd
 
 
 async def _forward(request: Request, raw_body: bytes) -> Response:

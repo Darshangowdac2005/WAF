@@ -58,6 +58,28 @@ _OSCI = re.compile(
     re.IGNORECASE,
 )
 
+# ── New attack pattern regexes (added for 29-feature model) ────────────────
+
+_SSRF = re.compile(
+    r"https?://(?:169\.254|127\.\d+\.\d+\.\d+|0\.0\.0\.0|localhost)"
+    r"|file://|dict://|gopher://|tftp://|ldap://",
+    re.IGNORECASE,
+)
+
+_XXE = re.compile(
+    r"<!ENTITY\b|SYSTEM\s+[\"']file://|<!DOCTYPE\b.*\[",
+    re.IGNORECASE,
+)
+
+_CRLF = re.compile(
+    r"%0[dD]%0[aA]|%0[dD]|%0[aA]|\r\n|\r|\n",
+)
+
+_OPEN_REDIRECT = re.compile(
+    r"(?:^|[\?&=])(?:url|next|redirect|return|dest|location)\s*=\s*(?://|https?://|javascript:)",
+    re.IGNORECASE,
+)
+
 # ── HTTP encoding maps ────────────────────────────────────────────────────────
 
 _HTTP_METHODS = {
@@ -114,9 +136,16 @@ FEATURE_NAMES = [
     "has_user_agent",          # 22  binary
     "has_referer",             # 23  binary
     "cookie_length",           # 24
+
+    # NEW security signal features (require retraining to activate in L2A/L2B)
+    # Add ONLY at the END to preserve trained model feature order.
+    "has_ssrf",                # 25  binary — SSRF pattern hit
+    "has_xxe",                 # 26  binary — XXE entity injection hit
+    "has_crlf",                # 27  binary — CRLF header injection hit
+    "has_open_redirect",       # 28  binary — open redirect param hit
 ]
 
-INPUT_DIM = len(FEATURE_NAMES)   # 25
+INPUT_DIM = len(FEATURE_NAMES)   # 29 (was 25 before security feature expansion)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -185,6 +214,11 @@ def extract_features(request: dict) -> dict:
     lfi_m  = _LFI.findall(scan)
     osci_m = _OSCI.findall(scan)
 
+    ssrf_m  = _SSRF.findall(scan)
+    xxe_m   = _XXE.findall(scan)
+    crlf_m  = _CRLF.findall(scan)
+    redir_m = _OPEN_REDIRECT.findall(scan)
+
     headers_lower  = {k.lower(): v for k, v in headers.items()}
     cookie_len     = len(headers_lower.get("cookie", ""))
     ct_raw         = headers_lower.get("content-type", "").split(";")[0].strip().lower()
@@ -216,6 +250,11 @@ def extract_features(request: dict) -> dict:
         "has_user_agent":        float("user-agent" in headers_lower),
         "has_referer":           float("referer" in headers_lower),
         "cookie_length":         float(cookie_len),
+        # NEW: security signal features (indices 25-28)
+        "has_ssrf":              float(bool(ssrf_m)),
+        "has_xxe":               float(bool(xxe_m)),
+        "has_crlf":              float(bool(crlf_m)),
+        "has_open_redirect":     float(bool(redir_m)),
     }
 
 
