@@ -22,7 +22,7 @@ CLASS_NAMES = [
 ]
 
 # if your ONNX model expects token_ids, keep True
-USES_TOKENS = True
+_uses_tokens = True
 
 
 def load() -> None:
@@ -43,7 +43,7 @@ def load() -> None:
     _in_name = _sess.get_inputs()[0].name
 
     logger.info("L2B loaded | input=%s | uses_tokens=%s | classes=%d",
-                _in_name, USES_TOKENS, len(CLASS_NAMES))
+                _in_name, _uses_tokens, len(CLASS_NAMES))
 
 
 def infer(fvec_scaled: np.ndarray, token_ids: np.ndarray):
@@ -52,7 +52,7 @@ def infer(fvec_scaled: np.ndarray, token_ids: np.ndarray):
     -------
     label, confidence, probabilities
     """
-    if USES_TOKENS:
+    if _uses_tokens:
         logits = _sess.run(None, {_in_name: token_ids.astype(np.int64)})[0][0]
     else:
         logits = _sess.run(None, {_in_name: fvec_scaled.astype(np.float32)})[0][0]

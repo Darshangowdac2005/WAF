@@ -29,8 +29,8 @@ def load_all() -> dict:
     # ── Layer 2A ──────────────────────────────────────────────────────────────
     try:
         l2a.load()
-        # Validate: run a dummy (1, 25) float32 vector through the session
-        dummy_fvec = np.zeros((1, 25), dtype=np.float32)
+        # Validate: run a dummy (1, 29) float32 vector through the session
+        dummy_fvec = np.zeros((1, 29), dtype=np.float32)
         _, score = l2a.infer(dummy_fvec)
         logger.info("L2A validation passed (dummy score=%.5f, threshold=%.5f)",
                     score, l2a._threshold)
@@ -42,8 +42,8 @@ def load_all() -> dict:
     try:
         l2b.load()
         # Validate: run dummy inputs matching the winner model type
-        dummy_fvec   = np.zeros((1, 25), dtype=np.float32)
-        dummy_tokens = np.zeros((1, 512), dtype=np.int64)
+        dummy_fvec   = np.zeros((1, 29), dtype=np.float32)
+        dummy_tokens = np.zeros((1, 256), dtype=np.int64)
         label, conf, _ = l2b.infer(dummy_fvec, dummy_tokens)
         logger.info("L2B validation passed (dummy → label=%s conf=%.4f)", label, conf)
     except Exception as e:

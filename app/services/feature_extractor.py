@@ -62,11 +62,11 @@ def extract(request: dict) -> tuple[np.ndarray, np.ndarray]:
     Returns
     -------
     fvec_scaled : np.ndarray
-        Shape (1, 25), dtype float32
+        Shape (1, 29), dtype float32
         EXACT same normalized feature vector used in training
 
     token_ids : np.ndarray
-        Shape (1, 512), dtype int64
+        Shape (1, 256), dtype int64
         EXACT same tokenizer output used in training
     """
     # 1) Exact training-side feature extraction
